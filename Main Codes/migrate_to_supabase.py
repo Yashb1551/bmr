@@ -10,10 +10,19 @@ Run it once, from the project root, with the TARGET database URL set:
 It reads:
   - Database/plant.db                 (equipment, products, users, orders,
                                         batches, allocations, cleaning steps,
-                                        audit log)
-  - Database/recipes.xlsx             (product recipes -> recipe_* tables)
-  - Database/ecr_templates.xlsx       (cleaning templates -> ecr_template_* tables)
+                                        audit log, and — on any database new
+                                        enough to have them — recipes and ECR
+                                        cleaning templates)
+  - Database/recipes.xlsx             (product recipes, ONLY as a fallback)
+  - Database/ecr_templates.xlsx       (cleaning templates, ONLY as a fallback)
 and writes all of it into DATABASE_URL. Source files are never modified.
+
+Recipes and ECR templates used to live in those two workbooks and now live in
+the database, so there are two possible sources for them. SQLite wins whenever
+it has rows: the workbooks are frozen at whenever the app stopped writing to
+them, so preferring them would silently roll back every recipe and cleaning
+template edited in the app since. The workbooks are read only for a database
+old enough to predate those tables.
 
 The target must be empty (no users). Re-run with --force to wipe the managed
 tables on the target first.
@@ -25,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sqlalchemy import create_engine, func, insert, select, text  # noqa: E402
+from sqlalchemy import create_engine, func, insert, inspect, select, text  # noqa: E402
 
 from batch_planner import config  # noqa: E402
 from batch_planner.models import (  # noqa: E402
@@ -35,9 +44,13 @@ from batch_planner.models import (  # noqa: E402
 
 # SQLite source tables, in an order that satisfies every foreign key.
 CORE_MODELS = [Equipment, Product, User, Order, Batch, Allocation, CleaningStep, AuditLog]
+# Recipes and cleaning templates, copied from SQLite when present and only
+# otherwise read from the legacy workbooks (see the module docstring).
+RECIPE_MODELS = [RecipeSheet, RecipeStage]
+ECR_MODELS = [EcrTemplate, EcrTemplateStep]
 # Target tables cleared by --force (reverse dependency order) and whose
 # Postgres id sequences need bumping after an id-preserving copy.
-ALL_MODELS = CORE_MODELS + [RecipeSheet, RecipeStage, EcrTemplate, EcrTemplateStep]
+ALL_MODELS = CORE_MODELS + RECIPE_MODELS + ECR_MODELS
 SEQ_MODELS = [Order, Batch, Allocation, CleaningStep, AuditLog, RecipeStage, EcrTemplateStep]
 
 
@@ -47,6 +60,16 @@ def _copy_table(model, src_conn, tgt_conn) -> int:
     if rows:
         tgt_conn.execute(insert(table), rows)
     return len(rows)
+
+
+def _source_row_count(model, src_conn, src_tables: set[str]) -> int:
+    """How many rows the SQLite source holds for this model — 0 if the table
+    predates the source database entirely."""
+    if model.__tablename__ not in src_tables:
+        return 0
+    return src_conn.execute(
+        select(func.count()).select_from(model.__table__)
+    ).scalar() or 0
 
 
 def _read_recipes_xlsx(path: Path) -> dict[str, list[dict]]:
@@ -140,40 +163,59 @@ def main() -> int:
             for model in reversed(ALL_MODELS):
                 tgt.execute(model.__table__.delete())
 
+        src_tables = set(inspect(src_engine).get_table_names())
+
         print("\nCopying database tables:")
         for model in CORE_MODELS:
             n = _copy_table(model, src, tgt)
             print(f"  {model.__tablename__:<20} {n}")
 
-        recipes_path = config.RECIPES_PATH
-        if recipes_path.exists():
-            print(f"\nImporting {recipes_path.name}:")
-            sheets = _read_recipes_xlsx(recipes_path)
-            if sheets:
-                tgt.execute(insert(RecipeSheet.__table__),
-                            [{"name": s} for s in sheets])
-            all_stages = [row for stage_list in sheets.values() for row in stage_list]
-            if all_stages:
-                tgt.execute(insert(RecipeStage.__table__), all_stages)
-            print(f"  recipe_sheets        {len(sheets)}")
-            print(f"  recipe_stages        {len(all_stages)}")
+        # Recipes: from SQLite if it has any, else the legacy workbook.
+        if _source_row_count(RecipeStage, src, src_tables):
+            for model in RECIPE_MODELS:
+                n = _copy_table(model, src, tgt)
+                print(f"  {model.__tablename__:<20} {n}")
         else:
-            print(f"\n(skipping {recipes_path.name} — not found)")
+            recipes_path = config.RECIPES_PATH
+            if recipes_path.exists():
+                print(f"\nNo recipes in {config.DB_PATH.name} — "
+                      f"falling back to {recipes_path.name}:")
+                sheets = _read_recipes_xlsx(recipes_path)
+                if sheets:
+                    tgt.execute(insert(RecipeSheet.__table__),
+                                [{"name": s} for s in sheets])
+                all_stages = [row for stage_list in sheets.values() for row in stage_list]
+                if all_stages:
+                    tgt.execute(insert(RecipeStage.__table__), all_stages)
+                print(f"  recipe_sheets        {len(sheets)}")
+                print(f"  recipe_stages        {len(all_stages)}")
+            else:
+                print(f"\nWARNING: no recipes in {config.DB_PATH.name} and no "
+                      f"{recipes_path.name} — the target will have no recipes.")
 
-        ecr_path = config.ECR_TEMPLATES_PATH
-        if ecr_path.exists():
-            print(f"\nImporting {ecr_path.name}:")
-            templates = _read_ecr_templates_xlsx(ecr_path)
-            if templates:
-                tgt.execute(insert(EcrTemplate.__table__),
-                            [{"key": k} for k in templates])
-            all_steps = [row for step_list in templates.values() for row in step_list]
-            if all_steps:
-                tgt.execute(insert(EcrTemplateStep.__table__), all_steps)
-            print(f"  ecr_template_sheets  {len(templates)}")
-            print(f"  ecr_template_steps   {len(all_steps)}")
+        # Cleaning templates: same rule.
+        if _source_row_count(EcrTemplateStep, src, src_tables):
+            for model in ECR_MODELS:
+                n = _copy_table(model, src, tgt)
+                print(f"  {model.__tablename__:<20} {n}")
         else:
-            print(f"\n(skipping {ecr_path.name} — not found)")
+            ecr_path = config.ECR_TEMPLATES_PATH
+            if ecr_path.exists():
+                print(f"\nNo cleaning templates in {config.DB_PATH.name} — "
+                      f"falling back to {ecr_path.name}:")
+                templates = _read_ecr_templates_xlsx(ecr_path)
+                if templates:
+                    tgt.execute(insert(EcrTemplate.__table__),
+                                [{"key": k} for k in templates])
+                all_steps = [row for step_list in templates.values() for row in step_list]
+                if all_steps:
+                    tgt.execute(insert(EcrTemplateStep.__table__), all_steps)
+                print(f"  ecr_template_sheets  {len(templates)}")
+                print(f"  ecr_template_steps   {len(all_steps)}")
+            else:
+                print(f"\nWARNING: no cleaning templates in {config.DB_PATH.name} "
+                      f"and no {ecr_path.name} — batches will fall back to a "
+                      f"single generic cleaning step.")
 
         if tgt_engine.dialect.name == "postgresql":
             print("\nResetting Postgres id sequences ...")

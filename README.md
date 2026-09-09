@@ -100,10 +100,19 @@ only, so it can be **public** safely. Do not commit anything under `Database/`.
    $env:DATABASE_URL = "postgresql://postgres.abcdefgh:PASSWORD@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
    python "Main Codes/migrate_to_supabase.py"
    ```
-   This copies `Database/plant.db` **and** the two Excel workbooks into
-   Postgres. Source files are not touched. (Re-run with `--force` to overwrite
-   the target.) Run it from the project root, and check the row counts it
-   prints before moving on.
+   This copies `Database/plant.db` into Postgres — equipment, products,
+   recipes, ECR templates, users, orders, batches and the audit log. Source
+   files are not touched. (Re-run with `--force` to overwrite the target.)
+   Run it from the project root, and check the row counts it prints before
+   moving on.
+
+   Recipes and cleaning templates used to live in `recipes.xlsx` /
+   `ecr_templates.xlsx` and now live in the database, so there are two
+   possible sources. The script takes **SQLite whenever it has rows** and
+   only falls back to a workbook for a database old enough to predate those
+   tables — the workbooks are frozen at whenever the app stopped writing to
+   them, so preferring them would silently roll back every recipe edited in
+   the app since. It prints which source it used for each.
 
 4. **Push the code** to a GitHub repo (public is fine — `Database/` is
    git-ignored, so no recipes or batch records go with it):
