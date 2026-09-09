@@ -1,0 +1,9 @@
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+
+[server]
+# Community Cloud manages port/address itself; these only affect local runs.
+headless = true

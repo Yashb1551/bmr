@@ -1,0 +1,24 @@
+# =====================================================================
+# This repo is PUBLIC. Nothing under Database/ may be committed — it holds
+# the SQLite DB, the recipe/ECR workbooks, and real production documents.
+# All of that lives in the Supabase database at runtime instead.
+# =====================================================================
+/Database/*
+!/Database/.gitkeep
+
+# Local secrets — never commit real credentials
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local scratch / editor
+_scratch_*/
+.vscode/
+.idea/
+.DS_Store
