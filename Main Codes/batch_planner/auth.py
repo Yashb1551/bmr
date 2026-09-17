@@ -5,7 +5,7 @@ import streamlit as st
 
 from datetime import datetime
 
-from . import scheduler, security
+from . import config, scheduler, security
 from .db import SessionLocal, init_db
 from .models import Equipment, User
 from .seed import seed_if_empty
@@ -17,9 +17,47 @@ def _ensure_ready() -> None:
         seed_if_empty(session)
 
 
+def _render_connection_banner() -> None:
+    """Show which database the sign-in is about to be checked against.
+
+    Without this, a missing DATABASE_URL is invisible: the app quietly falls
+    back to a local SQLite file, every real account appears not to exist, and
+    the only symptom is "invalid username or password" for every user and
+    every password — indistinguishable from a wrong password. Showing the
+    target (and how many accounts are in it) turns that into something you
+    can actually read off the screen. No credentials are shown.
+    """
+    target = config.describe_db_target()
+    try:
+        with SessionLocal() as session:
+            accounts = session.query(User).count()
+        reachable, detail = True, f"{accounts} account(s)"
+    except Exception as exc:  # noqa: BLE001 - surfaced to the operator verbatim
+        reachable, detail = False, f"{type(exc).__name__}: {exc}"
+
+    if not config.is_external_db():
+        st.error(
+            f"**Not connected to the shared database.** Using {target}. "
+            "On a hosted deployment this means `DATABASE_URL` did not reach "
+            "the app, so none of the real accounts exist here. Set it in the "
+            "app's Secrets and reboot."
+        )
+    elif not reachable:
+        st.error(f"**Cannot reach the database** ({target}) — {detail}")
+    elif accounts == 0:
+        st.error(
+            f"**Connected to {target}, but it has no accounts.** "
+            "Either it is the wrong database, or row-level security is "
+            "hiding the `users` table from this role."
+        )
+    else:
+        st.caption(f"Database: {target} · {detail}")
+
+
 def _login_form() -> None:
     st.title("🔒 Batch Planner — Sign in")
     st.caption("Pharmaceutical API Manufacturing Unit")
+    _render_connection_banner()
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
