@@ -40,6 +40,13 @@ def normalise_db_url(url: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+# Why each step of _resolve_db_url() did or did not supply a URL. Key *names*
+# only, never values - this is rendered on the sign-in screen when the lookup
+# falls through to SQLite, so that a misconfigured deployment says what is
+# actually missing instead of only that something is.
+DB_URL_NOTES: list[str] = []
+
+
 def _resolve_db_url() -> str:
     """Use an external database when DATABASE_URL is set — as an env var, or a
     Streamlit secret. Required for any hosted deployment (Streamlit Community
@@ -47,16 +54,36 @@ def _resolve_db_url() -> str:
     on every restart/redeploy). Falls back to the local SQLite file for
     on-prem / desktop use, which is unchanged."""
     url = os.environ.get("DATABASE_URL")
-    if not url:
-        try:
-            import streamlit as st
+    if url:
+        DB_URL_NOTES.append("found DATABASE_URL in the environment")
+        return normalise_db_url(url)
+    DB_URL_NOTES.append("no DATABASE_URL environment variable")
 
-            url = st.secrets.get("DATABASE_URL")
-        except Exception:
-            url = None
-    if not url:
+    try:
+        import streamlit as st
+    except Exception as exc:  # noqa: BLE001
+        DB_URL_NOTES.append(f"streamlit not importable ({type(exc).__name__})")
+        DB_URL_NOTES.append("falling back to the local SQLite file")
         return f"sqlite:///{DB_PATH}"
-    return normalise_db_url(url)
+
+    try:
+        keys = sorted(st.secrets.keys())
+    except Exception as exc:  # noqa: BLE001
+        # No secrets configured at all: on Community Cloud this means the
+        # Secrets box is empty, or was saved without rebooting the app.
+        DB_URL_NOTES.append(f"no secrets available ({type(exc).__name__})")
+        DB_URL_NOTES.append("falling back to the local SQLite file")
+        return f"sqlite:///{DB_PATH}"
+
+    DB_URL_NOTES.append(f"secrets loaded, keys = {keys or '(empty)'}")
+    url = st.secrets.get("DATABASE_URL")
+    if url:
+        DB_URL_NOTES.append("found DATABASE_URL in secrets")
+        return normalise_db_url(url)
+
+    DB_URL_NOTES.append("secrets contain no DATABASE_URL key")
+    DB_URL_NOTES.append("falling back to the local SQLite file")
+    return f"sqlite:///{DB_PATH}"
 
 
 DB_URL = _resolve_db_url()

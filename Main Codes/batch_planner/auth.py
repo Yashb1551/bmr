@@ -42,6 +42,10 @@ def _render_connection_banner() -> None:
             "the app, so none of the real accounts exist here. Set it in the "
             "app's Secrets and reboot."
         )
+        # Exactly where the lookup gave up, so the fix is not guesswork.
+        # Key names only - no secret values are ever rendered.
+        steps = "\n".join(f"- {note}" for note in config.DB_URL_NOTES)
+        st.markdown("**How the app looked for it:**\n" + steps)
     elif not reachable:
         st.error(f"**Cannot reach the database** ({target}) — {detail}")
     elif accounts == 0:
