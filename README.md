@@ -40,11 +40,11 @@ Pages (left sidebar):
 - **Scheduler** — three sections: schedule a new batch (with an optional batch number, shows that batch's full output right after scheduling); look up any already-scheduled batch's same full output by picking it from a dropdown; and a plant-wide Equipment Cleaning Schedule dashboard. See **Equipment Cleaning Records (ECR)** below for what "full output" now includes. A Manager with product access restrictions (see below) only sees their assigned products in the *schedule* dropdown — looking up an existing batch and the cleaning schedule are unrestricted for everyone.
 - **Equipment Map** — live occupancy grid, colored by status, grouped by plant block (API B2 / API B3) then floor then equipment category (Reactors first). Unrestricted for every role — always shows the full plant schedule.
 - **Gantt Timeline** — full plant schedule, plus a selector to pull up any single order/batch's own timeline across equipment. Unrestricted for every role — always shows the full plant schedule.
+- **Batches** (Admin + Manager) — a **Scheduled products** table of every batch on the books, earliest start first, with its output quantity, status and completion date, plus the total output across all of them; below it, reschedule, pause/resume, or delete any one batch. A restricted Manager only sees/manages batches for their assigned products.
 - **Equipment** (Admin only) — add/retire/delete equipment, import a master equipment list from a file, or import ECR cleaning-procedure templates from a file.
 - **Products** (Admin + Manager) — add, edit, delete products/recipes (pick by product name), or import a whole BMR from a file. Manager's edit rights are limited — see **User roles** below. A restricted Manager's product selector only lists their assigned products.
 - **ECR Master** (Admin + Manager) — pick an equipment category's cleaning procedure from a dropdown and edit its steps directly; that edited version becomes what every future batch's ECR log is generated from. See **Equipment Cleaning Records (ECR)** below.
 - **Users** (Admin only) — add accounts, reset passwords, change roles, delete accounts, and set per-Manager product access (**Product Access** tab).
-- **Batches** (Admin + Manager) — reschedule, pause/resume, or delete a batch that's already on the books. A restricted Manager only sees/manages batches for their assigned products.
 
 Every page requires signing in. A compact **Plant snapshot** (Free / Running
 / Cleaning / Down / Retired equipment counts, right now) sits at the top of

@@ -33,6 +33,10 @@ with SessionLocal() as session:
         ))
         batches = [b for b in batches if b.product_code in allowed]
     product_labels_by_code = product_display_names(session)
+    # One batch produces one batch-size worth of product, so that is this
+    # batch's output quantity (an order's total is split into
+    # ceil(quantity / batch_size) of them).
+    batch_size_by_code = {p.code: p.batch_size_kg for p in session.query(Product).all()}
     rows = []
     for b in batches:
         allocations = sorted(b.allocations, key=lambda a: a.op_start)
@@ -42,12 +46,17 @@ with SessionLocal() as session:
             "Product": product_labels_by_code.get(b.product_code, b.product_code),
             "Batch #": b.batch_number,
             "Batch No.": b.label or "",
+            "Output Qty (kg)": batch_size_by_code.get(b.product_code),
             "Status": b.status,
             "Planner": b.order.planner or "",
             "Start": allocations[0].op_start if allocations else None,
             "Completion": allocations[-1].op_end if allocations else None,
             "Operations": len(allocations),
         })
+
+# Earliest start first, so the table reads as a production calendar. Batches
+# with no bookings at all sort last rather than crashing the comparison.
+rows.sort(key=lambda r: (r["Start"] is None, r["Start"] or datetime.max))
 
 if not rows:
     if not is_admin:
@@ -57,8 +66,12 @@ if not rows:
         st.info("No batches scheduled yet. Go to the Scheduler page to schedule one.")
     st.stop()
 
+st.subheader("Scheduled products")
+total_output = sum(r["Output Qty (kg)"] or 0 for r in rows)
+st.caption(f"{len(rows)} batch(es), earliest start first — {total_output:g} kg of total output.")
 st.dataframe(
     [{k: v for k, v in r.items() if k != "batch_id"} | {
+        "Output Qty (kg)": f"{r['Output Qty (kg)']:g}" if r["Output Qty (kg)"] else "",
         "Start": r["Start"].strftime("%d/%m/%Y %H:%M") if r["Start"] else "",
         "Completion": r["Completion"].strftime("%d/%m/%Y %H:%M") if r["Completion"] else "",
     } for r in rows],
