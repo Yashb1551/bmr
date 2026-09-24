@@ -4,13 +4,14 @@ For every piece of equipment used in a batch, its cleaning procedure starts
 the moment its *last* use in that batch ends (mirrors the production
 schedule: end of equipment usage throughout the batch = start of cleaning),
 computed step by step from that equipment category's imported ECR template
-(ecr_templates.py), with the same kind of +/-5% per-step random variance a
-BMR applies to its thermal operations — see STEP_VARIANCE.
+(ecr_templates.py). Each step runs for exactly the time that master
+template gives it, so the same template always produces the same cleaning
+sequence, batch after batch.
 
 Like Allocation, the generated steps are computed once at schedule time and
-persisted (CleaningStep rows) rather than re-rolled on every view — the
-random variance has to be applied exactly once, or the same batch's cleaning
-times would silently change every time the page re-renders.
+persisted (CleaningStep rows) rather than recomputed on every view, so a
+batch's recorded cleaning times stay fixed even if the template is later
+edited — the log is a record of what was scheduled, not a live view.
 
 This is a reporting/documentation layer only: it doesn't change what the
 scheduler considers "free" equipment (Allocation.clean_end, from the
@@ -23,7 +24,6 @@ Once cleaned, equipment is considered "held clean" for CLEAN_HOLD_HOURS;
 past that, the Equipment Cleaning Schedule (equipment_cleaning_schedule())
 flags it as needing to be cleaned again before its next use.
 """
-import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -33,7 +33,6 @@ from . import bmr, ecr_templates
 from .models import Allocation, Batch, CleaningStep, Equipment, product_display_names
 
 CLEAN_HOLD_HOURS = 72
-STEP_VARIANCE = 0.05  # +/-5% per cleaning step, drawn independently for each
 
 
 @dataclass
@@ -70,7 +69,7 @@ def _build_steps(key: str, start: datetime, fallback_minutes: float) -> tuple[li
     template = ecr_templates.read_template(key)
     if not template:
         # No template and no cleaning time on the recipe either -> fall back to
-        # the standard 5 min +/-2% for an undefined duration rather than showing
+        # the fixed stand-in for an undefined duration rather than showing
         # nothing.
         minutes = fallback_minutes if fallback_minutes > 0 else bmr.resolve_op_minutes(0)
         end = start + timedelta(minutes=round(minutes))
@@ -79,11 +78,11 @@ def _build_steps(key: str, start: datetime, fallback_minutes: float) -> tuple[li
     steps: list[dict] = []
     cursor = start
     for step in template:
-        if step.op_minutes and step.op_minutes > 0:
-            minutes = round(step.op_minutes * random.uniform(1 - STEP_VARIANCE, 1 + STEP_VARIANCE))
-        else:
-            # Step with no time defined -> 5 min +/-2%, re-drawn each generation.
-            minutes = round(bmr.resolve_op_minutes(0), 2)
+        # Each step runs for exactly the time its ECR master template gives
+        # it — no per-batch variance, so the same template always produces the
+        # same cleaning sequence. A step the template leaves at 0 gets the
+        # fixed stand-in rather than zero length.
+        minutes = round(bmr.resolve_op_minutes(step.op_minutes))
         step_end = cursor + timedelta(minutes=minutes)
         steps.append({"name": step.name, "start": cursor, "end": step_end})
         cursor = step_end

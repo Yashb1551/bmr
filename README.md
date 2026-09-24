@@ -339,15 +339,13 @@ just one table:
   3. a volume in L -> 400 L = 25 min (0.0625 min/L).
   4. an analysis/QC mention -> LOD = 60 min, Moisture = 40 min, otherwise
      300 min for a complete analysis.
-  5. a heating/chilling/cooling mention -> 120 min. These operations also
-     get **+/-5% random variance per batch** at schedule time (see below) —
-     everything else runs at exactly its recipe duration, always.
+  5. a heating/chilling/cooling mention -> 120 min.
   6. a charge/load/unload mention -> 5 min.
   7. a "check ..." mention -> 20 min.
   8. otherwise 0, flagged "Not detected — set duration manually". A row left
      at 0 that still has equipment assigned isn't scheduled as instantaneous:
-     the scheduler (and the ECR generator, for cleaning steps) substitutes
-     **5 min +/-2%, re-drawn every run** — see below.
+     the scheduler (and the ECR generator, for cleaning steps) substitutes a
+     fixed **5 min** — see below.
 - Section-header rows that land in the Operation column with no real content
   (e.g. a lone "Stage-II") are automatically skipped, not imported as a step
   — and if a saved recipe still has a zero-duration, no-equipment row like
@@ -366,28 +364,36 @@ still exists for a single already-known product — it applies the same
 duration rules to one uploaded table, staged into the editor grid for you to
 adjust before saving.
 
-### Undefined durations: 5 min +/-2%
+### Every batch follows the master BMR's times exactly
 
-An operation (BMR) or cleaning step (ECR) with **no duration defined at all**
-is never treated as instantaneous. Every time it's scheduled or its ECR log
-is generated, it's given **5 minutes +/-2%, drawn fresh each time** — so
-repeated runs of the same batch are never identical. A row that is *both*
-zero-duration and has no equipment is still treated as a section-header
-label and skipped (see above); this substitution only applies once real
-equipment is being reserved.
+**An operation runs for exactly the time its recipe gives it — every batch,
+every time.** Nothing varies a duration at schedule time: not the operation
+type, not the batch number, not how busy the equipment is. Schedule the same
+product twice and the two batches have identical operation lengths; reschedule
+a batch and its operations keep the same durations they had before.
 
-### +/-5% variance on heating/chilling operations
+The master recipe on the **Products** page is therefore the single source of
+truth for timings. If a batch is taking the wrong amount of time, the recipe
+is what to correct.
 
-A recipe's stored duration for a heat/chill/cool/warm operation is its
-*nominal* value. Every time that operation is actually scheduled (per batch),
-the scheduler draws a fresh random value within +/-5% of that nominal and
-uses it for that batch only — modeling real physical variability in
-temperature ramps. Every other operation (including explicit "maintain ...
-for N hours" holds, which are deliberate and controlled, not ramps) runs at
-exactly its recipe duration, batch after batch. **Equipment availability
-never changes an operation's duration** — if equipment is busy, the operation
-waits for a later start time; its length is never stretched or shrunk to fit
-a gap.
+Two things follow from this that are worth being explicit about:
+
+- **Equipment availability never changes an operation's duration.** If the
+  equipment is busy the operation waits for a later start time; its length is
+  never stretched or shrunk to fit a gap.
+- **An operation the recipe leaves at 0 minutes** is not scheduled as
+  instantaneous — it would reserve a zero-length slot, which means nothing. It
+  gets a fixed **5 minutes** instead. This is a placeholder, not a real
+  timing: set the true duration on the Products page for any row where it
+  matters. (A row that is *both* zero-duration and has no equipment is treated
+  as a section-header label and skipped entirely — see above.)
+
+Cleaning steps work the same way: each step takes exactly the time its ECR
+master template gives it. See **Equipment Cleaning Records (ECR)** below.
+
+Note that **Temperature Actual is still drawn per batch** — a range like
+"60-65" picks a value within it for each batch's record. That's a recorded
+measurement, not a schedule timing, so it doesn't affect when anything runs.
 
 ### Batch numbers
 
@@ -432,18 +438,20 @@ Mill, Nutsche Filter, Sparkler Filter, Sifter — one procedure document per
 category, disambiguated by subtype only where a category has more than one,
 currently just Dryer's Vacuum Tray vs. Fluid Bed variants), using the exact
 same Op. No. / Operation / duration reading rules as a BMR (see *Importing a
-whole BMR file*, above) — each step's nominal duration then varies +/-5%
-per batch, independently per step, the same variance model used for BMR
-thermal operations. Equipment with no imported ECR template yet falls back
+whole BMR file*, above). Each step takes exactly the time the template gives
+it, for every batch — the same rule operations follow (see *Every batch
+follows the master BMR's times exactly*, above). Equipment with no imported
+ECR template yet falls back
 to a single generic "Equipment Cleaning" step using the recipe's own
 Cleaning Time instead of erroring out. As with the BMR table, any cleaning
 step mentioning **QC** or a **sample** is highlighted green.
 
 These steps are computed once, when the batch is scheduled or rescheduled,
-and stored — not re-rolled every time the page is viewed, so the same
-batch always shows the same cleaning times. Batches scheduled before this
-feature existed have no ECR log (nothing was computed for them at the
-time) — only newly scheduled or rescheduled batches get one.
+and stored — so a batch's log is a record of what was scheduled at the time,
+and editing a template later doesn't rewrite the history of batches already
+on the books. Reschedule a batch to pick up an edited template. Batches
+scheduled before this feature existed have no ECR log (nothing was computed
+for them at the time) — only newly scheduled or rescheduled batches get one.
 
 The ECR log is a documentation trail only: it does **not** change when the
 scheduler considers equipment free for its *next* booking — that's still

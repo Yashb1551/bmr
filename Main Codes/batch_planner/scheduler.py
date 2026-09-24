@@ -8,7 +8,6 @@ itself moves to its next stage as soon as the operation finishes at
 op_end, it doesn't wait for cleaning.
 """
 import math
-import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -16,8 +15,6 @@ from sqlalchemy.orm import Session
 
 from . import bmr, ecr, recipes
 from .models import Allocation, AuditLog, Batch, CleaningStep, Equipment, Order, Product
-
-THERMAL_VARIANCE = 0.05  # heating/chilling operations run +/-5% per batch
 
 
 class SchedulingError(Exception):
@@ -106,16 +103,13 @@ def _schedule_stages(session: Session, batch_id: int, recipe_sheet: str,
                 f"({stage.op_minutes:g} min) but no equipment IDs assigned"
             )
 
-        # An operation with no duration defined is given 5 min +/-2%, re-drawn
-        # every schedule run. Heating/chilling/cooling steps then run +/-5% per
-        # batch (physical process variability); every other operation runs at
-        # exactly its recipe duration — equipment availability never changes an
-        # operation's duration, only its start time.
-        base_minutes = bmr.resolve_op_minutes(stage.op_minutes)
-        if bmr.is_thermal_operation(stage.name):
-            op_minutes = base_minutes * random.uniform(1 - THERMAL_VARIANCE, 1 + THERMAL_VARIANCE)
-        else:
-            op_minutes = base_minutes
+        # Every operation runs for exactly the time the master BMR recipe
+        # gives it — no per-batch variance of any kind, so two batches of the
+        # same product have identical operation durations. Equipment
+        # availability never changes an operation's duration, only its start
+        # time. (An operation the recipe leaves at 0 is the one exception; see
+        # bmr.resolve_op_minutes.)
+        op_minutes = bmr.resolve_op_minutes(stage.op_minutes)
 
         best_equipment, best_start, best_end = None, None, None
         for equip_id in stage.equipment_ids:

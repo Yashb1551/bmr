@@ -19,9 +19,7 @@ Three directions:
            3. a volume in L (400 L = 25 min, 0.0625 min/L)
            4. an analysis/QC mention (LOD = 60 min, Moisture = 40 min,
               otherwise 300 min for a complete analysis)
-           5. a heating/chilling/cooling mention (120 min default; these
-              operations also get ±5% random variance per batch at
-              schedule time — see scheduler.py)
+           5. a heating/chilling/cooling mention (120 min default)
            6. a charge/load/unload mention (5 min)
            7. a "check ..." mention (20 min)
            8. otherwise 0, flagged for manual entry
@@ -98,20 +96,24 @@ CHARGE_DEFAULT_MINUTES = 5.0
 CHECK_DEFAULT_MINUTES = 20.0
 DEFAULT_CLEANING_MINUTES = 15.0  # applied to newly-imported operations that use equipment
 
-# When an operation/cleaning step has no duration defined at all, it's given
-# this long, re-drawn +/-2% every time it's scheduled/generated (so no two
-# runs are identical) rather than treated as instantaneous. Used by both the
-# scheduler (BMR operations) and ecr.py (cleaning steps).
+# A stand-in for an operation/cleaning step the master BMR leaves with no
+# duration at all. Such a row still reserves equipment, and a zero-length
+# reservation is meaningless, so it gets this fixed nominal length. It is a
+# constant, not a draw: the master BMR's time periods are what every batch
+# follows, so the same recipe must always produce the same schedule. A row
+# that matters should have its real time set on the Products page rather than
+# relying on this. Used by the scheduler (BMR operations) and ecr.py
+# (cleaning steps).
 UNDEFINED_OP_MINUTES = 5.0
-UNDEFINED_OP_VARIANCE = 0.02
 
 
 def resolve_op_minutes(op_minutes: float) -> float:
-    """`op_minutes` if it's a real positive duration, otherwise a fresh
-    5 min +/-2% draw. Not rounded — the small random spread is the point."""
+    """`op_minutes` if it's a real positive duration, otherwise the fixed
+    stand-in above. Deterministic — the same input always gives the same
+    output, for every batch."""
     if op_minutes and op_minutes > 0:
         return op_minutes
-    return UNDEFINED_OP_MINUTES * random.uniform(1 - UNDEFINED_OP_VARIANCE, 1 + UNDEFINED_OP_VARIANCE)
+    return UNDEFINED_OP_MINUTES
 
 _WORD_NUMBERS = {
     "half": 0.5, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -184,13 +186,6 @@ class ParsedBMR:
     operations: list[ParsedOperation]
 
 
-def is_thermal_operation(text: str) -> bool:
-    """True if this operation is a heating/chilling/cooling step — these get
-    +/-5% random duration variance per batch (scheduler.py), everything else
-    runs at exactly its recipe duration."""
-    return bool(_THERMAL_RE.search(text))
-
-
 def _number_from_match(raw: str) -> float:
     raw = raw.lower()
     return _WORD_NUMBERS[raw] if raw in _WORD_NUMBERS else float(raw)
@@ -227,7 +222,7 @@ def _duration_from_text(text: str) -> tuple[float, str]:
         return round(ANALYSIS_COMPLETE_MINUTES), "Default: Complete analysis"
 
     if _THERMAL_RE.search(text):
-        return round(THERMAL_DEFAULT_MINUTES), "Default: heating/chilling (varies +/-5% per batch)"
+        return round(THERMAL_DEFAULT_MINUTES), "Default: heating/chilling"
 
     if _CHARGE_RE.search(text):
         return round(CHARGE_DEFAULT_MINUTES), "Default: charge/load"
