@@ -4,7 +4,15 @@ pandas>=2.2
 plotly>=5.22
 python-docx>=1.1
 fpdf2>=2.7.6
-# Postgres driver — used when DATABASE_URL points at Postgres (Supabase, etc.)
-psycopg2-binary>=2.9
+# Postgres driver — used when DATABASE_URL points at Postgres (Supabase, etc.).
+# psycopg (v3) is what current SQLAlchemy selects by default for a
+# postgresql:// URL and it has wheels for new Python versions, including the
+# 3.14 that Streamlit Community Cloud may build with. psycopg2 is kept as well
+# so existing local installs keep working, but only where it still ships
+# wheels — building it from source needs pg_config and fails on a bare
+# container. config.normalise_db_url() pins the URL to whichever of the two is
+# actually importable, so either one alone is enough.
+psycopg[binary]>=3.1
+psycopg2-binary>=2.9; python_version < "3.13"
 # only used by the one-time migrate_to_supabase.py script
 openpyxl>=3.1

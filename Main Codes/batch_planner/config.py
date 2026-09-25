@@ -1,4 +1,5 @@
 """Paths shared across the app. Database/ sits next to Main Codes/ at the project root."""
+import importlib.util
 import os
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -16,25 +17,55 @@ RECIPES_PATH = DATABASE_DIR / "recipes.xlsx"
 ECR_TEMPLATES_PATH = DATABASE_DIR / "ecr_templates.xlsx"
 
 
+# Postgres DBAPIs this app can drive, in the order we'd rather use them.
+# psycopg (v3) first: it is what current SQLAlchemy reaches for by default and
+# it publishes wheels for new Python versions promptly. psycopg2 second, so
+# existing installs that only have it keep working untouched.
+_PG_DRIVERS = ("psycopg", "psycopg2")
+
+
+def _installed_pg_driver() -> str | None:
+    """First driver from _PG_DRIVERS that is actually importable, else None."""
+    for name in _PG_DRIVERS:
+        if importlib.util.find_spec(name) is not None:
+            return name
+    return None
+
+
 def normalise_db_url(url: str) -> str:
     """Make a pasted Supabase connection string usable as-is.
 
     Supabase hands you a ``postgresql://…`` URI with no driver or SSL mode on
-    it. Two fixes so copy-paste just works:
+    it. Three fixes so copy-paste just works:
 
     * ``postgres://`` -> ``postgresql://`` — SQLAlchemy 2.x dropped the short
       scheme, and several hosts still emit it.
+    * name the DBAPI explicitly (``postgresql+psycopg://``). A bare
+      ``postgresql://`` lets SQLAlchemy pick, and which one it picks changed
+      between versions: older ones load psycopg2, newer ones psycopg (v3). With
+      the requirements unpinned, that turns a deployment into a coin toss
+      decided by whatever SQLAlchemy pip happened to install — it fails at
+      import with ModuleNotFoundError if the chosen driver isn't the one that
+      got installed. Pinning the scheme to a driver we can actually import
+      makes the app work the same on every box.
     * add ``sslmode=require`` when it's missing. Supabase requires TLS; without
       the parameter libpq negotiates it anyway but won't fail closed, so we set
       it explicitly rather than relying on the server to insist.
 
-    Anything already spelled out in the URL is left alone.
+    Anything already spelled out in the URL is left alone — including an
+    explicit ``+driver``, so you can still force one by hand.
     """
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if not url.startswith("postgresql"):
         return url
     parts = urlsplit(url)
+
+    if "+" not in parts.scheme:
+        driver = _installed_pg_driver()
+        if driver is not None:
+            parts = parts._replace(scheme=f"postgresql+{driver}")
+
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.setdefault("sslmode", "require")
     return urlunsplit(parts._replace(query=urlencode(query)))
