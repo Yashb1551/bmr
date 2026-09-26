@@ -14,7 +14,7 @@ from batch_planner.db import SessionLocal
 from batch_planner.models import AuditLog
 
 st.set_page_config(page_title="ECR Master", page_icon="🧽", layout="wide")
-current_user = require_login(min_role=["Admin", "Manager"])
+current_user = require_login(min_role=["Admin", "Manager", "Temp Editor"])
 
 st.title("🧽 ECR Master")
 st.caption("One cleaning procedure per equipment category, used to generate every batch's ECR log "

@@ -37,14 +37,14 @@ Admin and delete this one) before giving anyone else access — the default is
 in the source, so it isn't a secret.
 
 Pages (left sidebar):
-- **Scheduler** — three sections: schedule a new batch (with an optional batch number, shows that batch's full output right after scheduling); look up any already-scheduled batch's same full output by picking it from a dropdown; and a plant-wide Equipment Cleaning Schedule dashboard. See **Equipment Cleaning Records (ECR)** below for what "full output" now includes. A Manager with product access restrictions (see below) only sees their assigned products in the *schedule* dropdown — looking up an existing batch and the cleaning schedule are unrestricted for everyone.
+- **Scheduler** — three sections: schedule a new batch (with an optional batch number, shows that batch's full output right after scheduling); look up any already-scheduled batch's same full output by picking it from a dropdown; and a plant-wide Equipment Cleaning Schedule dashboard. See **Equipment Cleaning Records (ECR)** below for what "full output" now includes. Every role can schedule any active product.
 - **Equipment Map** — live occupancy grid, colored by status, grouped by plant block (API B2 / API B3) then floor then equipment category (Reactors first). Unrestricted for every role — always shows the full plant schedule.
 - **Gantt Timeline** — full plant schedule, plus a selector to pull up any single order/batch's own timeline across equipment. Unrestricted for every role — always shows the full plant schedule.
-- **Batches** (Admin + Manager) — a **Scheduled products** table of every batch on the books, earliest start first, with its output quantity, status and completion date, plus the total output across all of them; below it, reschedule, pause/resume, or delete any one batch. A restricted Manager only sees/manages batches for their assigned products.
+- **Batches** (Admin + Manager) — a **Scheduled products** table of every batch on the books, earliest start first, with its output quantity, status and completion date, plus the total output across all of them; below it, reschedule, pause/resume, or delete any one batch. A Temp Editor cannot open this page.
 - **Equipment** (Admin only) — add/retire/delete equipment, import a master equipment list from a file, or import ECR cleaning-procedure templates from a file.
-- **BMR Master** (Admin + Manager) — add, edit, delete products/recipes (pick by product name), or **Upload BMR**: attach a Master BMR document and it is parsed into a product with its recipe. Manager's edit rights are limited to certain columns — see **User roles** below — but every Manager can edit every product.
-- **ECR Master** (Admin + Manager) — pick an equipment category's cleaning procedure from a dropdown and edit its steps directly; that edited version becomes what every future batch's ECR log is generated from. See **Equipment Cleaning Records (ECR)** below.
-- **Users** (Admin + Manager) — Admin: add accounts, reset passwords, change roles, delete accounts, and set per-Manager product access. Manager: the **Product Access** tab only — assigning products is a scheduling decision, but creating accounts and changing roles is not.
+- **BMR Master** (Admin + Manager + Temp Editor) — add, edit, delete products/recipes (pick by product name), or **Upload BMR**: attach a Master BMR document and it is parsed into a product with its recipe. Manager and Temp Editor can edit only certain columns, on every product — see **User roles** below.
+- **ECR Master** (Admin + Manager + Temp Editor) — pick an equipment category's cleaning procedure from a dropdown and edit its steps directly; that edited version becomes what every future batch's ECR log is generated from. See **Equipment Cleaning Records (ECR)** below.
+- **Users** (Admin only) — add accounts, reset passwords, change roles, delete accounts.
 
 Every page requires signing in. A compact **Plant snapshot** (Free / Running
 / Cleaning / Down / Retired equipment counts, right now) sits at the top of
@@ -161,41 +161,25 @@ username is `postgres.<project-ref>`, not bare `postgres`.
 
 ### User roles
 
-- **Admin** — full access everywhere: Equipment/BMR Master/ECR Master/Batches/Users, every field of every recipe and ECR template, every product.
-- **Manager** — everything a Planner can do, plus, **for every product** (no product scoping applies to any of these):
-  - schedule a batch for any active product on the **Scheduler**;
-  - open **BMR Master** and edit any *existing* product's **Operation Time**, **Cleaning Time**, and **Actual Temperature** columns (Operation text, Equipment IDs, and Standard Temperature are read-only; adding/deleting operation rows, adding/deleting products, and uploading BMRs are hidden entirely);
-  - edit cleaning-step templates on **ECR Master**;
-  - assign product access on **Users → Product Access**.
+Four roles, least to most privileged. **Every role can schedule a batch for any
+active product, and everyone sees the whole plant schedule** — there is no
+per-user product restriction anywhere in the app.
 
-  Scoped by their product assignment: reschedule/pause/resume/delete batches on **Batches**. No access to the Equipment page, and on Users only the Product Access tab — adding accounts, resetting passwords, changing roles and deleting users stay Admin-only, since a Manager who could change roles could make themselves an Admin.
-- **Planner** — can schedule new batches (Scheduler page) and look up any already-scheduled batch's BMR/ECR output at any time, plus the Equipment Map/Gantt Timeline. No edit or delete rights anywhere — can't touch BMR Master, ECR Master, Batches, Equipment, or Users.
+- **Planner** — schedule new batches and look up any already-scheduled batch's BMR/ECR output at any time, plus the Equipment Map and Gantt Timeline. No edit or delete rights anywhere.
+- **Temp Editor** — a *temporary editor*: everything a Planner can do, plus edit any product's **Operation Time**, **Cleaning Time** and **Actual Temperature** on **BMR Master**, and edit cleaning-step templates on **ECR Master**. Operation text, Equipment IDs and Standard Temperature stay read-only; adding/deleting operation rows, adding/deleting products and uploading BMRs are hidden. **Cannot open the Batches page** — no rescheduling, pausing or deleting a booked batch.
+- **Manager** — everything a Temp Editor can do, plus **Batches**: reschedule, pause/resume and delete any batch already on the books.
+- **Admin** — full access everywhere: Equipment, BMR Master, ECR Master, Batches, Users, every field of every recipe and ECR template.
 
-Set a user's role from **Users** (Admin only).
+Only an **Admin** manages accounts (add, reset password, change role, delete) — from **Users**.
 
-### Per-Manager product access
+So the two privileged actions split like this:
 
-This scopes **one thing only: which already-booked batches a Manager may manage
-on the Batches page.** Assign products from **Users** -> **Product Access** (an
-Admin, or another Manager): pick the Manager, multiselect their products, Save.
-That Manager can then reschedule, pause/resume and delete batches for those
-products, and no others.
-
-It deliberately does **not** limit what a Manager can *start* or *edit*: every
-Manager can schedule a batch for any active product and edit any product's
-recipe on BMR Master, whatever their assignment says. A Manager with no
-assignment at all is still fully able to schedule and edit — they just cannot
-manage existing batches.
-
-Assignments are per Manager, so different Managers can hold different,
-non-overlapping (or overlapping) groups. Viewing is never affected — the
-Equipment Map and Gantt Timeline always show the complete schedule across every
-product, for every role. Admins and Planners are never scoped.
-
-⚠️ One consequence worth knowing: because scheduling is unscoped but batch
-management is not, a Manager can create a batch they then cannot reschedule or
-delete. If that bites, either assign them the products they schedule for, or
-say the word and the Batches page can be unscoped too.
+| | Planner | Temp Editor | Manager | Admin |
+|---|---|---|---|---|
+| Schedule a batch, view everything | ✅ | ✅ | ✅ | ✅ |
+| Edit recipes / ECR templates (limited columns) | — | ✅ | ✅ | ✅ (all columns) |
+| Delete or reschedule a booked batch | — | — | ✅ | ✅ |
+| Add/delete products, upload BMRs, equipment, accounts | — | — | — | ✅ |
 
 ### A note on data protection
 
@@ -569,7 +553,7 @@ erased.
 - Login is username/password only (PBKDF2-hashed, stored in the database), no
   SSO/2FA. Every admin action (add/delete equipment, products, recipes,
   users, imports) is written to the audit log with the acting username.
-- The Manager role's column-level restrictions (BMR Master) are enforced
+- The Manager / Temp Editor column-level restrictions (BMR Master) are enforced
   in the UI (disabled grid columns), not by a database-level permission
   check — anyone with direct write access to the database bypasses that.
   Fine for a trusted internal deployment; would need a server-side check for

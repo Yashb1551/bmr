@@ -14,13 +14,14 @@ from batch_planner.db import SessionLocal
 from batch_planner.models import AuditLog, Equipment, Order, Product
 
 st.set_page_config(page_title="BMR Master", page_icon="📦", layout="wide")
-current_user = require_login(min_role=["Admin", "Manager"])
+current_user = require_login(min_role=["Admin", "Manager", "Temp Editor"])
 is_admin = current_user["role"] == "Admin"
 
 st.title("📦 BMR Master")
 if not is_admin:
-    st.caption("Signed in as Manager: you can edit Operation Time, Cleaning Time, and Actual "
-               "Temperature for an existing product's recipe. Everything else is read-only.")
+    st.caption(f"Signed in as {current_user['role']}: you can edit Operation Time, Cleaning "
+               "Time, and Actual Temperature for any existing product's recipe. Everything "
+               "else is read-only.")
 
 with SessionLocal() as session:
     products = session.query(Product).order_by(Product.code).all()

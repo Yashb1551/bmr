@@ -5,19 +5,17 @@ import streamlit as st
 
 from batch_planner.auth import require_login
 from batch_planner.db import SessionLocal
-from batch_planner.models import Allocation, Batch, Order, Product, User, filter_products_for_user, product_display_names
+from batch_planner.models import Batch, Order, Product, product_display_names
 from batch_planner import scheduler
 
 st.set_page_config(page_title="Batches", page_icon="🗂️", layout="wide")
 current_user = require_login(min_role=["Admin", "Manager"])
-is_admin = current_user["role"] == "Admin"
 
 st.title("🗂️ Batches")
 st.caption("Reschedule, pause, or delete a batch that's already on the books. Rescheduling or "
            "deleting only ever touches the one batch you pick — sibling batches in the same "
-           "order, and every other order, are left exactly as they are.")
-if not is_admin:
-    st.caption("Signed in as Manager: only batches for your assigned products are shown here.")
+           "order, and every other order, are left exactly as they are. Admin and Manager only: "
+           "a Temp Editor can edit recipes but cannot touch a booked batch.")
 
 with SessionLocal() as session:
     batches = (
@@ -26,12 +24,6 @@ with SessionLocal() as session:
         .order_by(Order.id.desc(), Batch.batch_number)
         .all()
     )
-    if not is_admin:
-        account = session.get(User, current_user["username"])
-        allowed = set(filter_products_for_user(
-            account.role, account.allowed_products, [b.product_code for b in batches]
-        ))
-        batches = [b for b in batches if b.product_code in allowed]
     product_labels_by_code = product_display_names(session)
     # One batch produces one batch-size worth of product, so that is this
     # batch's output quantity (an order's total is split into
@@ -59,11 +51,7 @@ with SessionLocal() as session:
 rows.sort(key=lambda r: (r["Start"] is None, r["Start"] or datetime.max))
 
 if not rows:
-    if not is_admin:
-        st.info("No products have been assigned to your account yet, or none have batches scheduled. "
-                "Ask an Admin to assign products on the **Users** page (Product Access tab).")
-    else:
-        st.info("No batches scheduled yet. Go to the Scheduler page to schedule one.")
+    st.info("No batches scheduled yet. Go to the Scheduler page to schedule one.")
     st.stop()
 
 st.subheader("Scheduled products")

@@ -164,9 +164,8 @@ CREATE TABLE IF NOT EXISTS users (
     username         VARCHAR NOT NULL,
     password_hash    VARCHAR NOT NULL,   -- PBKDF2, see batch_planner/security.py
     display_name     VARCHAR NOT NULL,
-    role             VARCHAR NOT NULL,   -- Admin / Manager / Planner
+    role             VARCHAR NOT NULL,   -- Admin / Manager / Temp Editor / Planner
     active           BOOLEAN NOT NULL,
-    allowed_products VARCHAR,            -- Manager only; comma-separated codes
     PRIMARY KEY (username)
 );
 

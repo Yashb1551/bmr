@@ -176,21 +176,6 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String, default="Planner")  # "Admin" or "Planner"
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    allowed_products: Mapped[str | None] = mapped_column(String, nullable=True)  # comma-separated product codes; Manager only, None/empty = no access
-
-
-def filter_products_for_user(role: str, allowed_products_raw: str | None, all_codes: list[str]) -> list[str]:
-    """Restrict a code list to the products a Manager is responsible for.
-
-    Scopes the Batches page only — which already-booked batches a Manager may
-    reschedule, pause or delete. Starting a batch (Scheduler) and editing a
-    recipe (BMR Master) are open to every Manager regardless of assignment,
-    and Admins and Planners are never scoped.
-    """
-    if role != "Manager":
-        return list(all_codes)
-    allowed = {c.strip() for c in (allowed_products_raw or "").split(",") if c.strip()}
-    return [c for c in all_codes if c in allowed]
 
 
 def product_display_names(session) -> dict[str, str]:
