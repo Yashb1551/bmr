@@ -18,14 +18,16 @@ def _ensure_ready() -> None:
 
 
 def _render_connection_banner() -> None:
-    """Show which database the sign-in is about to be checked against.
+    """Warn, on the sign-in screen, when the database cannot serve a login.
 
-    Without this, a missing DATABASE_URL is invisible: the app quietly falls
-    back to a local SQLite file, every real account appears not to exist, and
-    the only symptom is "invalid username or password" for every user and
-    every password — indistinguishable from a wrong password. Showing the
-    target (and how many accounts are in it) turns that into something you
-    can actually read off the screen. No credentials are shown.
+    Nothing is shown when the connection is healthy — a working app should
+    not advertise its infrastructure on the login page.
+
+    The failure cases are worth interrupting for. A missing DATABASE_URL is
+    otherwise invisible: the app quietly falls back to a local SQLite file,
+    every real account appears not to exist, and the only symptom is "invalid
+    username or password" for every user and every password — indistinguishable
+    from simply mistyping it. No credentials are ever shown.
     """
     target = config.describe_db_target()
     try:
@@ -54,8 +56,6 @@ def _render_connection_banner() -> None:
             "Either it is the wrong database, or row-level security is "
             "hiding the `users` table from this role."
         )
-    else:
-        st.caption(f"Database: {target} · {detail}")
 
 
 def _login_form() -> None:

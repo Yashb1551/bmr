@@ -24,7 +24,7 @@ Three directions:
            7. a "check ..." mention (20 min)
            8. otherwise 0, flagged for manual entry
   2. scan_folder() lists BMR files in a folder that aren't linked to a
-     product yet, for the Products page "import" UI.
+     product yet, for the BMR Master page "upload" UI.
 
 Standard Temperature is only accepted from the source document when it
 actually looks like a temperature (a number, range, or a short token like
@@ -101,7 +101,7 @@ DEFAULT_CLEANING_MINUTES = 15.0  # applied to newly-imported operations that use
 # reservation is meaningless, so it gets this fixed nominal length. It is a
 # constant, not a draw: the master BMR's time periods are what every batch
 # follows, so the same recipe must always produce the same schedule. A row
-# that matters should have its real time set on the Products page rather than
+# that matters should have its real time set on BMR Master rather than
 # relying on this. Used by the scheduler (BMR operations) and ecr.py
 # (cleaning steps).
 UNDEFINED_OP_MINUTES = 5.0

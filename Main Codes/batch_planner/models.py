@@ -46,7 +46,7 @@ class Product(Base):
 
 class RecipeSheet(Base):
     """One product recipe (was a sheet in recipes.xlsx). Kept as its own row
-    so an empty, not-yet-filled recipe still 'exists' for the Products page."""
+    so an empty, not-yet-filled recipe still 'exists' for the BMR Master page."""
     __tablename__ = "recipe_sheets"
 
     name: Mapped[str] = mapped_column(String, primary_key=True)
@@ -180,9 +180,13 @@ class User(Base):
 
 
 def filter_products_for_user(role: str, allowed_products_raw: str | None, all_codes: list[str]) -> list[str]:
-    """Restrict a code list to what a Manager is allowed to work on. Admins and
-    Planners are unrestricted (schedule viewing is unrestricted for everyone;
-    this is only used to scope batch add/edit/delete + recipe-edit actions)."""
+    """Restrict a code list to the products a Manager is responsible for.
+
+    Scopes the Batches page only — which already-booked batches a Manager may
+    reschedule, pause or delete. Starting a batch (Scheduler) and editing a
+    recipe (BMR Master) are open to every Manager regardless of assignment,
+    and Admins and Planners are never scoped.
+    """
     if role != "Manager":
         return list(all_codes)
     allowed = {c.strip() for c in (allowed_products_raw or "").split(",") if c.strip()}

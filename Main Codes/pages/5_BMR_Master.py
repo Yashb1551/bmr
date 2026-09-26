@@ -1,22 +1,23 @@
-"""Products: Admin has full access (add/delete products, import BMRs, edit
+"""BMR Master: Admin has full access (add/delete products, upload BMRs, edit
 every recipe field). Manager can only edit an existing product's Operation
 Time, Cleaning Time, and Actual Temperature — everything else here is
 read-only or hidden."""
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from batch_planner import bmr, config, recipes
+from batch_planner import bmr, recipes
 from batch_planner.auth import require_login
 from batch_planner.db import SessionLocal
-from batch_planner.models import AuditLog, Equipment, Order, Product, User, filter_products_for_user
+from batch_planner.models import AuditLog, Equipment, Order, Product
 
-st.set_page_config(page_title="Products", page_icon="📦", layout="wide")
+st.set_page_config(page_title="BMR Master", page_icon="📦", layout="wide")
 current_user = require_login(min_role=["Admin", "Manager"])
 is_admin = current_user["role"] == "Admin"
 
-st.title("📦 Products")
+st.title("📦 BMR Master")
 if not is_admin:
     st.caption("Signed in as Manager: you can edit Operation Time, Cleaning Time, and Actual "
                "Temperature for an existing product's recipe. Everything else is read-only.")
@@ -33,30 +34,52 @@ st.divider()
 
 if is_admin:
     tab_import, tab_add, tab_edit, tab_delete = st.tabs(
-        ["Import from BMR Folder", "Add Product", "Edit Product / Recipe", "Delete Product"]
+        ["Upload BMR", "Add Product", "Edit Product / Recipe", "Delete Product"]
     )
 else:
     tab_edit = st.container()
     tab_import = tab_add = tab_delete = None
 
+def _clear_bmr_upload() -> None:
+    for key in ("bmr_import_target", "bmr_import_parsed", "bmr_upload_sig"):
+        st.session_state.pop(key, None)
+
+
 if tab_import is not None:
     with tab_import:
-        bmr_files = bmr.scan_folder(config.BMR_FOLDER)
-        if not bmr_files:
-            st.info(f"No BMR files found in `{config.BMR_FOLDER}` yet.")
-        else:
-            with SessionLocal() as session:
-                existing_codes = {p.code for p in session.query(Product).all()}
-            for f in bmr_files:
-                rel = f.relative_to(config.BMR_FOLDER)
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    st.markdown(f"📄 **{rel}**")
-                with col2:
-                    if st.button("Preview", key=f"preview_{rel}"):
-                        st.session_state["bmr_import_target"] = str(f)
-                        st.session_state.pop("bmr_import_parsed", None)
-                        st.rerun()
+        st.caption("Attach a Master BMR and it is parsed straight away — check the "
+                   "operations it read below, correct the product details, then confirm "
+                   "to save it as a product with its recipe.")
+
+        uploaded = st.file_uploader(
+            "Master BMR document", type=["docx", "doc"], key="bmr_upload_widget",
+            help="Legacy .doc needs Microsoft Word installed on the machine running the "
+                 "app, so it only works locally. .docx works everywhere.",
+        )
+
+        with SessionLocal() as session:
+            existing_codes = {p.code for p in session.query(Product).all()}
+
+        if uploaded is not None:
+            # Re-parse only when the attachment actually changes, otherwise every
+            # widget interaction on this page would throw away edits made to the
+            # product fields below.
+            signature = (uploaded.name, uploaded.size)
+            if st.session_state.get("bmr_upload_sig") != signature:
+                # Parsing reads the *filename* as well as the contents — the stage
+                # suffix ("... Stage-I") and the product-code fallback both come from
+                # it — so the temp copy has to keep the name the user uploaded.
+                tmp_dir = Path(tempfile.mkdtemp(prefix="bmr_upload_"))
+                saved = tmp_dir / Path(uploaded.name).name
+                saved.write_bytes(uploaded.getvalue())
+                st.session_state["bmr_upload_sig"] = signature
+                st.session_state["bmr_import_target"] = str(saved)
+                st.session_state.pop("bmr_import_parsed", None)
+                st.rerun()
+        elif st.session_state.get("bmr_upload_sig") is not None:
+            # Attachment cleared with the widget's x — drop the staged parse too.
+            _clear_bmr_upload()
+            st.rerun()
 
         target = st.session_state.get("bmr_import_target")
         if target:
@@ -143,14 +166,12 @@ if tab_import is not None:
                                           f"{Path(target).name} ({len(new_stages)} operations)"),
                             ))
                             session.commit()
-                        st.session_state.pop("bmr_import_target", None)
-                        st.session_state.pop("bmr_import_parsed", None)
+                        _clear_bmr_upload()
                         st.success(f"Imported '{code_clean}'. Review it under 'Edit Product / Recipe' before scheduling real batches.")
                         st.rerun()
                 with btn_col2:
                     if st.button("Cancel"):
-                        st.session_state.pop("bmr_import_target", None)
-                        st.session_state.pop("bmr_import_parsed", None)
+                        _clear_bmr_upload()
                         st.rerun()
 
 if tab_add is not None:
@@ -183,21 +204,13 @@ if tab_add is not None:
 
 with tab_edit:
     with SessionLocal() as session:
-        all_edit_products = session.query(Product).order_by(Product.name).all()
-        if is_admin:
-            edit_products = all_edit_products
-        else:
-            account = session.get(User, current_user["username"])
-            allowed = set(filter_products_for_user(
-                account.role, account.allowed_products, [p.code for p in all_edit_products]
-            ))
-            edit_products = [p for p in all_edit_products if p.code in allowed]
+        # Every product is editable here regardless of role. What a Manager
+        # may change is still narrowed column-by-column further down; their
+        # product assignment scopes the Batches page, not this one.
+        edit_products = session.query(Product).order_by(Product.name).all()
         product_options = {f"{p.name} ({p.code})": p.code for p in edit_products}
 
-    if not is_admin and not product_options:
-        st.info("No products have been assigned to your account yet. Ask an Admin to assign some "
-                "on the **Users** page (Product Access tab).")
-    elif not product_options:
+    if not product_options:
         st.info("No products yet.")
     else:
         selected_label = st.selectbox("Select product", list(product_options.keys()), key="edit_product_select")
@@ -262,7 +275,7 @@ with tab_edit:
                     "(20 min); otherwise 0, for manual entry. Equipment IDs in brackets (e.g. "
                     "'[PR/API/SSR/01]') are read automatically and carry forward to later operations "
                     "until a different code appears — check the assignments below before saving. For "
-                    "whole BMR files (including legacy .doc), use the **Import from BMR Folder** tab "
+                    "whole BMR files (including legacy .doc), use the **Upload BMR** tab "
                     "instead — it also reads product code/name/batch size and standard temperature."
                 )
                 uploaded = st.file_uploader("BMR Word document (.docx)", type=["docx"], key=f"uploader_{selected}")

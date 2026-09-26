@@ -19,7 +19,7 @@ current_user = require_login(min_role=["Admin", "Manager"])
 st.title("🧽 ECR Master")
 st.caption("One cleaning procedure per equipment category, used to generate every batch's ECR log "
            "on the Scheduler page. Edit a category's steps here and Save — that becomes the master "
-           "for every future batch, exactly like editing a product's recipe on the Products page.")
+           "for every future batch, exactly like editing a product's recipe on BMR Master.")
 
 
 def _pretty_label(key: str) -> str:

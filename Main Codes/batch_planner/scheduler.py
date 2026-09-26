@@ -159,7 +159,7 @@ def schedule_order(session: Session, product_code: str, quantity_kg: float,
         raise SchedulingError(f"Product '{product_code}' has no recipe stages defined yet")
     if product.batch_size_kg <= 0:
         raise SchedulingError(
-            f"Product '{product_code}' has no batch size set yet — set it on the Products page first"
+            f"Product '{product_code}' has no batch size set yet — set it on BMR Master first"
         )
 
     num_batches = math.ceil(quantity_kg / product.batch_size_kg)

@@ -10,7 +10,7 @@ import streamlit as st
 from batch_planner import ecr, pdf_export, scheduler, style
 from batch_planner.auth import require_login
 from batch_planner.db import SessionLocal
-from batch_planner.models import Batch, Order, Product, User, filter_products_for_user, product_display_names
+from batch_planner.models import Batch, Order, Product, product_display_names
 
 st.set_page_config(page_title="Batch Planner", page_icon="🧪", layout="wide")
 user = require_login()
@@ -135,20 +135,15 @@ def render_batch_schedule(session, batch_id: int, key_prefix: str = "") -> None:
 
 
 with SessionLocal() as session:
+    # Every role can schedule any active product — a Manager's product
+    # assignment scopes what they can manage afterwards (Batches page), not
+    # what they are allowed to start.
     products = session.query(Product).filter(Product.active == True).order_by(Product.name).all()
-    account = session.get(User, user["username"])
-    allowed_codes = filter_products_for_user(account.role, account.allowed_products, [p.code for p in products])
 
 st.subheader("Schedule a New Batch")
 
 if not products:
-    st.warning("No active products yet. Go to **Products** (left sidebar) to add one.")
-    st.stop()
-
-products = [p for p in products if p.code in allowed_codes]
-if not products:
-    st.warning("No products have been assigned to your account yet. Ask an Admin to assign some "
-               "on the **Users** page (Product Access tab).")
+    st.warning("No active products yet. Go to **BMR Master** (left sidebar) to add one.")
     st.stop()
 
 product_labels = {f"{p.name} ({p.code})": p.code for p in products}

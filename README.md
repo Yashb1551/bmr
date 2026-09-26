@@ -42,9 +42,9 @@ Pages (left sidebar):
 - **Gantt Timeline** — full plant schedule, plus a selector to pull up any single order/batch's own timeline across equipment. Unrestricted for every role — always shows the full plant schedule.
 - **Batches** (Admin + Manager) — a **Scheduled products** table of every batch on the books, earliest start first, with its output quantity, status and completion date, plus the total output across all of them; below it, reschedule, pause/resume, or delete any one batch. A restricted Manager only sees/manages batches for their assigned products.
 - **Equipment** (Admin only) — add/retire/delete equipment, import a master equipment list from a file, or import ECR cleaning-procedure templates from a file.
-- **Products** (Admin + Manager) — add, edit, delete products/recipes (pick by product name), or import a whole BMR from a file. Manager's edit rights are limited — see **User roles** below. A restricted Manager's product selector only lists their assigned products.
+- **BMR Master** (Admin + Manager) — add, edit, delete products/recipes (pick by product name), or **Upload BMR**: attach a Master BMR document and it is parsed into a product with its recipe. Manager's edit rights are limited to certain columns — see **User roles** below — but every Manager can edit every product.
 - **ECR Master** (Admin + Manager) — pick an equipment category's cleaning procedure from a dropdown and edit its steps directly; that edited version becomes what every future batch's ECR log is generated from. See **Equipment Cleaning Records (ECR)** below.
-- **Users** (Admin only) — add accounts, reset passwords, change roles, delete accounts, and set per-Manager product access (**Product Access** tab).
+- **Users** (Admin + Manager) — Admin: add accounts, reset passwords, change roles, delete accounts, and set per-Manager product access. Manager: the **Product Access** tab only — assigning products is a scheduling decision, but creating accounts and changing roles is not.
 
 Every page requires signing in. A compact **Plant snapshot** (Free / Running
 / Cleaning / Down / Retired equipment counts, right now) sits at the top of
@@ -154,33 +154,48 @@ username is `postgres.<project-ref>`, not bare `postgres`.
 
 - Legacy **`.doc`** import needs Microsoft Word (Windows only) — it shows a
   clear message and is effectively disabled. **`.docx`** upload/import works.
-- The folder-import tabs (*Import from BMR Folder*, *Import Equipment List*,
-  *Import ECR Templates*) read files from `Database/…`, which isn't in the
-  repo — use them locally, or drag-drop `.docx` files through the per-product
-  uploader instead.
+- BMRs are uploaded as attachments (**BMR Master → Upload BMR**), so they
+  work on the hosted app. The remaining folder-import tabs (*Import Equipment
+  List*, *Import ECR Templates*) still read from `Database/…`, which isn't in
+  the repo — use those locally.
 
 ### User roles
 
-- **Admin** — full access everywhere: Equipment/Products/ECR Master/Batches/Users, every field of every recipe and ECR template, every product.
-- **Manager** — everything a Planner can do, plus: can open Products and edit an *existing* product's **Operation Time**, **Cleaning Time**, and **Actual Temperature** columns (Operation text, Equipment IDs, and Standard Temperature are read-only; adding/deleting operation rows, adding/deleting products, and importing BMRs are hidden entirely); can edit cleaning-step templates on **ECR Master**; can reschedule/pause/resume/delete batches on **Batches**. No access to the Equipment or Users pages (importing BMRs, equipment lists, or ECR templates stays Admin-only).
-- **Planner** — can schedule new batches (Scheduler page) and look up any already-scheduled batch's BMR/ECR output at any time, plus the Equipment Map/Gantt Timeline. No edit or delete rights anywhere — can't touch Products, ECR Master, Batches, Equipment, or Users.
+- **Admin** — full access everywhere: Equipment/BMR Master/ECR Master/Batches/Users, every field of every recipe and ECR template, every product.
+- **Manager** — everything a Planner can do, plus, **for every product** (no product scoping applies to any of these):
+  - schedule a batch for any active product on the **Scheduler**;
+  - open **BMR Master** and edit any *existing* product's **Operation Time**, **Cleaning Time**, and **Actual Temperature** columns (Operation text, Equipment IDs, and Standard Temperature are read-only; adding/deleting operation rows, adding/deleting products, and uploading BMRs are hidden entirely);
+  - edit cleaning-step templates on **ECR Master**;
+  - assign product access on **Users → Product Access**.
+
+  Scoped by their product assignment: reschedule/pause/resume/delete batches on **Batches**. No access to the Equipment page, and on Users only the Product Access tab — adding accounts, resetting passwords, changing roles and deleting users stay Admin-only, since a Manager who could change roles could make themselves an Admin.
+- **Planner** — can schedule new batches (Scheduler page) and look up any already-scheduled batch's BMR/ECR output at any time, plus the Equipment Map/Gantt Timeline. No edit or delete rights anywhere — can't touch BMR Master, ECR Master, Batches, Equipment, or Users.
 
 Set a user's role from **Users** (Admin only).
 
 ### Per-Manager product access
 
-By default a new Manager has **no** product access — an Admin has to explicitly
-assign products from **Users** -> **Product Access**: pick the Manager, multiselect
-the products they should work on, and Save. Once assigned, that Manager can only:
-- start new batches for those products (Scheduler page's schedule dropdown is filtered),
-- reschedule, pause/resume, or delete batches for those products (Batches page is filtered),
-- edit the recipe for those products (Products page selector is filtered).
+This scopes **one thing only: which already-booked batches a Manager may manage
+on the Batches page.** Assign products from **Users** -> **Product Access** (an
+Admin, or another Manager): pick the Manager, multiselect their products, Save.
+That Manager can then reschedule, pause/resume and delete batches for those
+products, and no others.
 
-This restriction is scoped per Manager, so different Managers can be assigned
-different, non-overlapping (or overlapping) product groups. It does **not**
-affect viewing — the Equipment Map and Gantt Timeline always show the complete
-schedule across every product, for every role, so everyone can see what the
-whole plant is doing. Admins and Planners are never restricted by this setting.
+It deliberately does **not** limit what a Manager can *start* or *edit*: every
+Manager can schedule a batch for any active product and edit any product's
+recipe on BMR Master, whatever their assignment says. A Manager with no
+assignment at all is still fully able to schedule and edit — they just cannot
+manage existing batches.
+
+Assignments are per Manager, so different Managers can hold different,
+non-overlapping (or overlapping) groups. Viewing is never affected — the
+Equipment Map and Gantt Timeline always show the complete schedule across every
+product, for every role. Admins and Planners are never scoped.
+
+⚠️ One consequence worth knowing: because scheduling is unscoped but batch
+management is not, a Manager can create a batch they then cannot reschedule or
+delete. If that bites, either assign them the products they schedule for, or
+say the word and the Batches page can be unscoped too.
 
 ### A note on data protection
 
@@ -249,7 +264,7 @@ recipe per product, one row per operation in run order, with these fields:
 | **Standard Temperature** | 60-65 |
 | **Actual Temperature** | (blank, or e.g. "62") |
 
-Edit them on the **Products** page → *Edit Product / Recipe*. (Earlier versions
+Edit them on the **BMR Master** page → *Edit Product / Recipe*. (Earlier versions
 kept this in `Database/recipes.xlsx`; `migrate_to_supabase.py` moves an
 existing workbook into the database.)
 
@@ -273,7 +288,7 @@ in the recipe or the schedule ever shows a fractional-minute value.
   actually scheduled, a fresh value within 1-2 degrees (or, for a range,
   uniformly within it) is drawn independently for that batch's own record —
   see **Temperature Actual** on the schedule, below.
-- Edit recipes through the **Products** page -> *Edit Product / Recipe* (pick
+- Edit recipes through the **BMR Master** page -> *Edit Product / Recipe* (pick
   the product by **name**, not code — codes are shown alongside for products
   that share a name, e.g. "Bilastine (A004)" vs "Bilastine (A004/I)"). A
   **Manager** account can only edit Operation Time, Cleaning Time, and Actual
@@ -284,16 +299,16 @@ in the recipe or the schedule ever shows a fractional-minute value.
   overwrites a saved operation's time or temperature; re-importing a product
   that already has manual edits shows a clear warning before it would
   overwrite anything.
-- Batch size is per-product (set on the Products page, Admin only). Requested
+- Batch size is per-product (set on BMR Master, Admin only). Requested
   quantity is split into `ceil(quantity / batch_size)` batches.
 
 ### Importing a whole BMR file
 
 Drop a `.doc` or `.docx` BMR into `Database\BMR\` — directly, or in a
 per-block subfolder like `Database\BMR\B2\` / `Database\BMR\B3\` — and it
-shows up on the **Products** page -> *Import from BMR Folder* with a
-**Preview** button, labeled with its path relative to `BMR\` (e.g.
-`B3\BMR- Amlodipine Besilate.doc`). This reads the *entire* document, not
+is uploaded on the **BMR Master** page -> *Upload BMR*. Attach the file and
+it is parsed immediately — no folder, no server-side path, so this works on
+the hosted app as well as locally. This reads the *entire* document, not
 just one table:
 
 - **Product code / name / batch size** are read from the page header table
@@ -372,7 +387,7 @@ type, not the batch number, not how busy the equipment is. Schedule the same
 product twice and the two batches have identical operation lengths; reschedule
 a batch and its operations keep the same durations they had before.
 
-The master recipe on the **Products** page is therefore the single source of
+The master recipe on the **BMR Master** page is therefore the single source of
 truth for timings. If a batch is taking the wrong amount of time, the recipe
 is what to correct.
 
@@ -384,7 +399,7 @@ Two things follow from this that are worth being explicit about:
 - **An operation the recipe leaves at 0 minutes** is not scheduled as
   instantaneous — it would reserve a zero-length slot, which means nothing. It
   gets a fixed **5 minutes** instead. This is a placeholder, not a real
-  timing: set the true duration on the Products page for any row where it
+  timing: set the true duration on BMR Master for any row where it
   matters. (A row that is *both* zero-duration and has no equipment is treated
   as a section-header label and skipped entirely — see above.)
 
@@ -478,7 +493,7 @@ list.
 An imported ECR template is a starting point, not the final word — open
 **ECR Master**, pick a category from the dropdown, and edit its steps
 (add/remove/reorder rows, change an operation's text or its time) directly,
-the same editable-grid pattern as the Products page's recipe editor. Once
+the same editable-grid pattern as the BMR Master recipe editor. Once
 saved, that edited version is the master: every future batch's ECR log is
 generated from it, and re-importing that category's original Word document
 on the Equipment page will warn you first rather than silently overwriting
@@ -509,7 +524,7 @@ documents matched the master equipment list exactly. `A012` and `A012/I`
 (Dorzolamide HCl) were imported earlier the same way and still exist as
 products (one has real order history), but their source `.doc` files are no
 longer in the BMR folder, so they won't be refreshed by a re-import — edit
-them directly on the Products page if they need changes. Plus `API-037`, an
+them directly on BMR Master if they need changes. Plus `API-037`, an
 earlier manual transcription of a *different* Ketoconazole master-BMR PDF
 (see below).
 
@@ -519,13 +534,13 @@ before the automated BMR-folder pipeline existed; `A028` (from the later,
 cleanly-parseable `.doc` version of the same BMR) is the higher-fidelity
 version — real equipment IDs, real temperatures, exact charge quantities —
 and is the one real orders now use. `API-037`'s own order history has since
-been cleared out via the Batches page; consider retiring it (Products page ->
-untick Active) or deleting it (Products page -> Delete Product) now that it
+been cleared out via the Batches page; consider retiring it (BMR Master ->
+untick Active) or deleting it (BMR Master -> Delete Product) now that it
 has no schedule history left blocking that.
 
 Many operations in these imports were left at 0 min (no explicit
 duration/quantity/volume/keyword match in the source text) — review each
-product's recipe on the **Products** page before scheduling real batches
+product's recipe on the **BMR Master** page before scheduling real batches
 against it.
 
 ## Scheduling logic
@@ -554,7 +569,7 @@ erased.
 - Login is username/password only (PBKDF2-hashed, stored in the database), no
   SSO/2FA. Every admin action (add/delete equipment, products, recipes,
   users, imports) is written to the audit log with the acting username.
-- The Manager role's column-level restrictions (Products page) are enforced
+- The Manager role's column-level restrictions (BMR Master) are enforced
   in the UI (disabled grid columns), not by a database-level permission
   check — anyone with direct write access to the database bypasses that.
   Fine for a trusted internal deployment; would need a server-side check for
