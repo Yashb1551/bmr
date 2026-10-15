@@ -425,12 +425,25 @@ from the Scheduler page's **View an Existing Batch's Schedule** section.
 Below every batch's BMR-style table (both right after scheduling, and when
 looking a batch up later) is its **Equipment Cleaning Record (ECR) log** —
 one cleaning sequence per distinct piece of equipment the batch actually
-used, starting the moment that equipment's *last* use in the batch ends
-(end of equipment usage throughout the batch = start of cleaning; when an
-equipment ID is reused across several non-adjacent operations, this is the
-truly last one by BMR Op. No., not just whichever tied allocation happened
-to be read first). Each entry shows which **BMR Op. No.** that final use
-was, not the operation text. Each cleaning sequence is computed step-by-step
+used. The equipment is dirty from the moment the batch finishes with it (its
+*last* use by BMR Op. No. — not whichever tied allocation happened to be
+read first), and must be clean again before whatever is booked on it next.
+The cleaning is scheduled into that gap, **not onto the critical path**:
+production moves straight to the next operation while the cleaning runs
+alongside, often while the batch is busy on other equipment.
+
+Where in the gap it lands balances two rules:
+
+- **as soon as possible** after the equipment comes free, so the work is done
+  while there is slack rather than against the clock;
+- **finishing no more than 72 hours before the next booking**, because a
+  clean is only held good that long — cleaning a vessel a week before it is
+  needed just means cleaning it twice.
+
+So cleaning follows the use directly when the next booking is near, and is
+held back to land inside the 72-hour clean-hold when the next booking is far
+off. Each entry shows which **BMR Op. No.** that final use was, not the
+operation text. Each cleaning sequence is computed step-by-step
 from that equipment **category's**
 imported ECR template (Reactor, Blender, Centrifuge, Dryer, Multi Mill, Jet
 Mill, Nutsche Filter, Sparkler Filter, Sifter — one procedure document per
@@ -442,8 +455,19 @@ it, for every batch — the same rule operations follow (see *Every batch
 follows the master BMR's times exactly*, above). Equipment with no imported
 ECR template yet falls back
 to a single generic "Equipment Cleaning" step using the recipe's own
-Cleaning Time instead of erroring out. As with the BMR table, any cleaning
-step mentioning **QC** or a **sample** is highlighted green.
+Cleaning Time instead of erroring out.
+
+⚠️ **When the gap is too short**, the log says so rather than pretending
+otherwise. The scheduler frees equipment after the recipe's own *Cleaning
+Time*, which is usually far shorter than the full ECR procedure (a Reactor
+template runs ~8.5 hours against a Cleaning Time of perhaps 15–60 minutes).
+If the next batch is booked before the cleaning could finish, that entry is
+flagged on the Scheduler page with the conflicting times. Fix it by raising
+that operation's Cleaning Time on BMR Master, or by starting the next batch
+later — the ECR log reports the clash, it does not silently absorb it.
+
+As with the BMR table, any cleaning step mentioning **QC** or a **sample**
+is highlighted green.
 
 These steps are computed once, when the batch is scheduled or rescheduled,
 and stored — so a batch's log is a record of what was scheduled at the time,

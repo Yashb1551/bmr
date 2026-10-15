@@ -106,8 +106,17 @@ def render_batch_schedule(session, batch_id: int, key_prefix: str = "") -> None:
         op_no_bit = f"Op. No. {entry.last_op_no}" if entry.last_op_no is not None else "an earlier operation"
         st.markdown(
             f"**{entry.equipment_id}** ({entry.category}) — cleaning after **{op_no_bit}**, "
+            f"done by **{entry.cleaning_end:%d/%m/%Y %H:%M}**, "
             f"held clean until **{entry.held_clean_until:%d/%m/%Y %H:%M}**{note}"
         )
+        if not entry.ready_in_time:
+            st.warning(
+                f"⚠️ {entry.equipment_id} is booked again at "
+                f"**{entry.next_use_start:%d/%m/%Y %H:%M}**, before this cleaning finishes at "
+                f"**{entry.cleaning_end:%d/%m/%Y %H:%M}**. The gap the scheduler left is the "
+                f"recipe's Cleaning Time, which is shorter than this equipment's full ECR "
+                f"procedure — raise that Cleaning Time, or start the next batch later."
+            )
         if not entry.steps:
             st.caption("No cleaning duration available for this equipment yet.")
             continue
