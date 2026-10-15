@@ -457,14 +457,36 @@ ECR template yet falls back
 to a single generic "Equipment Cleaning" step using the recipe's own
 Cleaning Time instead of erroring out.
 
-⚠️ **When the gap is too short**, the log says so rather than pretending
-otherwise. The scheduler frees equipment after the recipe's own *Cleaning
-Time*, which is usually far shorter than the full ECR procedure (a Reactor
-template runs ~8.5 hours against a Cleaning Time of perhaps 15–60 minutes).
-If the next batch is booked before the cleaning could finish, that entry is
-flagged on the Scheduler page with the conflicting times. Fix it by raising
-that operation's Cleaning Time on BMR Master, or by starting the next batch
-later — the ECR log reports the clash, it does not silently absorb it.
+#### Changeover vs same-product cleaning
+
+**How much cleaning is owed depends on what runs next.**
+
+- **Product changeover** — the next batch on that equipment is a *different*
+  product: the **full ECR procedure**, every step of the category's template
+  (a Reactor's runs ~520 min / 8.7 h).
+- **Same product again** — a campaign of back-to-back batches: only the
+  shorter **batch-to-batch clean**, **90 minutes** by default, set per
+  category on **ECR Master**.
+- **Nothing booked after it** — the full changeover clean is assumed, since
+  what comes next isn't known yet. Cleaning too thoroughly is recoverable;
+  the reverse isn't.
+
+**The scheduler holds the equipment for whichever applies**, so this is not
+just paperwork — it changes the plan. Equipment is unavailable from
+`op_start` until its cleaning is genuinely done, not merely until the
+recipe's short Cleaning Time has elapsed. A campaign therefore turns
+equipment over far faster than a changeover does: three A028 batches finish
+roughly **78 hours sooner** than A028 → A007 → A017 from the same start.
+
+Because the answer depends on what follows, booking a batch can *change* the
+clean an earlier batch owes — a reactor handed from one A028 batch to another
+drops from the full procedure to 90 minutes. Scheduling re-derives the
+previous occupant's cleaning on each piece of equipment it takes over, so the
+stored ECR log never disagrees with the schedule it documents.
+
+⚠️ If the equipment is still booked again before its cleaning could finish,
+that entry is flagged on the Scheduler page with the conflicting times — the
+log reports the clash rather than silently absorbing it.
 
 As with the BMR table, any cleaning step mentioning **QC** or a **sample**
 is highlighted green.

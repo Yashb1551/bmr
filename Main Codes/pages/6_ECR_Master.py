@@ -67,9 +67,30 @@ if df.empty:
     df = pd.DataFrame([{"Operation": "Step 1", "Time (min)": 0}])
 
 st.markdown(f"#### {selected_label}")
-st.caption("A step left at 0 (no time defined) is generated as 5 min ±2%, re-drawn for every "
-           "batch's ECR — it's never treated as instantaneous.")
+st.caption("These steps are the **changeover** clean — what this equipment needs when the "
+           "next batch is a *different* product. Every step runs for exactly the time set "
+           "here, for every batch; a step left at 0 is treated as 5 minutes rather than "
+           "instantaneous.")
 edited = st.data_editor(df, num_rows="dynamic", width='stretch', key=editor_key)
+
+changeover_total = sum(
+    float(pd.to_numeric(r["Time (min)"], errors="coerce") or 0) for _, r in edited.iterrows()
+)
+st.caption(f"Changeover clean total: **{changeover_total:g} min** "
+           f"({changeover_total / 60:.1f} h).")
+
+st.markdown("##### Same-product cleaning")
+st.caption("When the *same* product runs again on this equipment, the full procedure above "
+           "isn't required — only this shorter batch-to-batch clean. The scheduler holds the "
+           "equipment for whichever of the two applies, so a campaign of one product turns "
+           "over far faster than a changeover does.")
+same_product_minutes = st.number_input(
+    "Same-product cleaning time (min)", min_value=0.0, step=15.0,
+    value=float(ecr_templates.read_same_product_minutes(selected_key)),
+    key=f"same_product_{selected_key}_{st.session_state.get('_ecr_master_nonce', 0)}",
+    help="Used when the next batch on this equipment is the same product. "
+         "Defaults to 90 minutes until you set one.",
+)
 
 if st.button("Save ECR", type="primary"):
     new_steps = []
@@ -82,11 +103,15 @@ if st.button("Save ECR", type="primary"):
             name=name, op_minutes=round(float(minutes)) if pd.notna(minutes) else 0.0,
         ))
     ecr_templates.write_template(selected_key, new_steps)
+    ecr_templates.write_same_product_minutes(selected_key, same_product_minutes)
     with SessionLocal() as session:
         session.add(AuditLog(
             action="UPDATE_ECR_TEMPLATE",
-            details=f"{current_user['username']} updated ECR template '{selected_key}'",
+            details=(f"{current_user['username']} updated ECR template '{selected_key}' "
+                      f"({len(new_steps)} step(s), same-product clean "
+                      f"{same_product_minutes:g} min)"),
         ))
         session.commit()
-    st.success(f"Saved '{selected_label}' ({len(new_steps)} step(s)).")
+    st.success(f"Saved '{selected_label}' ({len(new_steps)} step(s), "
+               f"same-product clean {same_product_minutes:g} min).")
     st.rerun()

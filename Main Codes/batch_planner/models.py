@@ -68,12 +68,23 @@ class RecipeStage(Base):
     actual_temperature: Mapped[str] = mapped_column(String, default="")
 
 
+# Minutes of cleaning between two batches of the SAME product, when no
+# category-specific value has been set. A full changeover clean is the whole
+# ECR template (a Reactor's runs ~520 min); running the same product again
+# needs only the shorter batch-to-batch clean.
+DEFAULT_SAME_PRODUCT_CLEAN_MINUTES = 90.0
+
+
 class EcrTemplate(Base):
     """One equipment category's cleaning procedure (was a sheet in
     ecr_templates.xlsx). `key` is category, or "Dryer-<subtype>"."""
     __tablename__ = "ecr_template_sheets"
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
+    # Cleaning between two batches of the same product. The full step list
+    # (EcrTemplateStep) is the changeover clean, used when the next batch is a
+    # different product; this single figure replaces it when it is not.
+    same_product_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class EcrTemplateStep(Base):

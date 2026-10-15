@@ -11,7 +11,9 @@ This mirrors recipes.py. It used to be a single Excel workbook
 import re
 
 from .db import SessionLocal
-from .models import EcrTemplate, EcrTemplateStep
+from .models import (
+    DEFAULT_SAME_PRODUCT_CLEAN_MINUTES, EcrTemplate, EcrTemplateStep,
+)
 
 
 class TemplateStep:
@@ -67,4 +69,27 @@ def write_template(key: str, steps: list[TemplateStep]) -> None:
                 template_key=key, seq=i + 1, name=step.name or f"Step {i + 1}",
                 op_minutes=step.op_minutes,
             ))
+        session.commit()
+
+
+def read_same_product_minutes(key: str) -> float:
+    """Minutes of cleaning between two batches of the same product on this
+    equipment category. Falls back to the shared default when the category
+    has no value of its own."""
+    with SessionLocal() as session:
+        row = session.get(EcrTemplate, key)
+        if row is None or row.same_product_minutes is None:
+            return DEFAULT_SAME_PRODUCT_CLEAN_MINUTES
+        return float(row.same_product_minutes)
+
+
+def write_same_product_minutes(key: str, minutes: float) -> None:
+    """Sets this category's same-product cleaning time, creating the template
+    row if the category has no imported procedure yet."""
+    with SessionLocal() as session:
+        row = session.get(EcrTemplate, key)
+        if row is None:
+            row = EcrTemplate(key=key)
+            session.add(row)
+        row.same_product_minutes = float(minutes)
         session.commit()

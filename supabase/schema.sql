@@ -72,7 +72,12 @@ CREATE INDEX IF NOT EXISTS ix_recipe_stages_sheet ON recipe_stages (sheet);
 -- "key" is quoted throughout: it is a PostgreSQL keyword (non-reserved, so it
 -- would parse bare, but quoting removes the doubt).
 CREATE TABLE IF NOT EXISTS ecr_template_sheets (
-    "key" VARCHAR NOT NULL,
+    "key"                VARCHAR NOT NULL,
+    -- Cleaning between two batches of the SAME product. The step list in
+    -- ecr_template_steps is the full changeover clean, used when the next
+    -- batch is a different product; this shorter figure replaces it when it
+    -- is not. NULL means "use the 90-minute default".
+    same_product_minutes FLOAT,
     PRIMARY KEY ("key")
 );
 

@@ -57,12 +57,35 @@ class OrderResult:
         return max(b.completion for b in self.batches)
 
 
+def _free_from(session: Session, alloc: Allocation, equipment: Equipment | None,
+                incoming_product: str) -> datetime:
+    """When `equipment` is genuinely available again after `alloc`.
+
+    Not alloc.clean_end: that is the recipe's own Cleaning Time, which is a
+    changeover buffer of minutes where the real procedure takes hours. The
+    equipment is free once the cleaning the next batch actually requires has
+    been done — the full ECR procedure across a product changeover, or the
+    shorter batch-to-batch clean when the same product runs again.
+    """
+    outgoing = session.get(Batch, alloc.batch_id)
+    minutes = ecr.required_clean_minutes(
+        session, equipment,
+        outgoing.product_code if outgoing else None,
+        incoming_product,
+    )
+    # An equipment category with no imported ECR procedure has nothing better
+    # to go on, so the recipe's buffer stands.
+    return max(alloc.clean_end, alloc.op_end + timedelta(minutes=minutes))
+
+
 def _earliest_free_slot(session: Session, equipment_id: str, earliest_start: datetime,
-                         duration_minutes: float) -> datetime:
+                         duration_minutes: float, incoming_product: str) -> datetime:
     """Earliest moment >= earliest_start that `equipment_id` is free for
     `duration_minutes`, checking gaps between (and before/after) existing
-    bookings on that equipment."""
+    bookings on that equipment — each one followed by the cleaning that
+    running `incoming_product` next would require."""
     duration = timedelta(minutes=duration_minutes)
+    equipment = session.get(Equipment, equipment_id)
     existing = (
         session.query(Allocation)
         .filter(Allocation.equipment_id == equipment_id)
@@ -71,11 +94,12 @@ def _earliest_free_slot(session: Session, equipment_id: str, earliest_start: dat
     )
     candidate = earliest_start
     for alloc in existing:
-        if alloc.clean_end <= candidate:
-            continue  # this booking is already in the past relative to candidate
+        free_from = _free_from(session, alloc, equipment, incoming_product)
+        if free_from <= candidate:
+            continue  # this booking, and its cleaning, are already behind us
         if alloc.op_start >= candidate + duration:
             break  # candidate fits in the gap before this booking
-        candidate = max(candidate, alloc.clean_end)  # push past this booking + its cleaning
+        candidate = max(candidate, free_from)  # push past this booking + its cleaning
     return candidate
 
 
@@ -86,7 +110,8 @@ def _batch_label(base_label: str | None, batch_num: int, num_batches: int) -> st
 
 
 def _schedule_stages(session: Session, batch_id: int, recipe_sheet: str,
-                      stages: list[recipes.Stage], ready_time: datetime) -> list[StageAllocationResult]:
+                      stages: list[recipes.Stage], ready_time: datetime,
+                      product_code: str) -> list[StageAllocationResult]:
     """Places every stage of one batch on the earliest available matching
     equipment, starting no earlier than `ready_time`. Shared by both a fresh
     schedule_order() call and a later reschedule_batch()."""
@@ -116,7 +141,8 @@ def _schedule_stages(session: Session, batch_id: int, recipe_sheet: str,
             equip = session.get(Equipment, equip_id)
             if equip is None or equip.status != "Active":
                 continue
-            free_start = _earliest_free_slot(session, equip_id, ready_time, op_minutes)
+            free_start = _earliest_free_slot(session, equip_id, ready_time, op_minutes,
+                                              product_code)
             free_end = free_start + timedelta(minutes=op_minutes)
             if best_end is None or free_end < best_end:
                 best_equipment, best_start, best_end = equip_id, free_start, free_end
@@ -177,8 +203,12 @@ def schedule_order(session: Session, product_code: str, quantity_kg: float,
         session.add(batch)
         session.flush()
 
-        stage_results = _schedule_stages(session, batch.id, product.recipe_sheet, stages, requested_start)
+        stage_results = _schedule_stages(session, batch.id, product.recipe_sheet, stages,
+                                          requested_start, product_code)
         ecr.generate_cleaning_steps_for_batch(session, batch.id)
+        # Booking this batch can shorten the clean the previous occupant of
+        # each piece of equipment owes — see refresh_handover_cleaning.
+        ecr.refresh_handover_cleaning(session, batch.id)
         batch_results.append(BatchResult(batch_num, batch.id, batch.label, stage_results))
 
     session.add(AuditLog(
@@ -213,8 +243,10 @@ def reschedule_batch(session: Session, batch_id: int, new_start: datetime,
     session.query(CleaningStep).filter(CleaningStep.batch_id == batch.id).delete()
     session.flush()
 
-    stage_results = _schedule_stages(session, batch.id, product.recipe_sheet, stages, new_start)
+    stage_results = _schedule_stages(session, batch.id, product.recipe_sheet, stages,
+                                      new_start, batch.product_code)
     ecr.generate_cleaning_steps_for_batch(session, batch.id)
+    ecr.refresh_handover_cleaning(session, batch.id)
 
     session.add(AuditLog(
         action="RESCHEDULE_BATCH",

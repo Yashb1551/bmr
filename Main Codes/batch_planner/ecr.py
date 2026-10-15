@@ -86,15 +86,63 @@ class EquipmentECR:
         return self.cleaning_end + timedelta(hours=CLEAN_HOLD_HOURS)
 
 
-def _step_durations(key: str, fallback_minutes: float) -> tuple[list[tuple[str, int]], bool]:
+def _next_booking(session: Session, equipment_id: str, after: datetime) -> Allocation | None:
+    """The next operation booked on this equipment at or after `after`."""
+    return (
+        session.query(Allocation)
+        .filter(Allocation.equipment_id == equipment_id,
+                Allocation.op_start >= after)
+        .order_by(Allocation.op_start)
+        .first()
+    )
+
+
+def required_clean_minutes(session: Session, equipment: "Equipment | None",
+                            outgoing_product: str | None,
+                            incoming_product: str | None) -> float:
+    """Minutes of cleaning owed on this equipment between two batches.
+
+    A product changeover needs the full procedure - the whole ECR template,
+    which for a reactor runs around 520 minutes. Running the same product
+    again needs only the shorter batch-to-batch clean, 90 minutes by default
+    and settable per category on ECR Master.
+
+    `incoming_product` of None means nothing is booked next and we cannot
+    know what follows, so the full changeover clean is assumed rather than
+    the short one: cleaning too thoroughly is recoverable, the reverse is
+    not.
+    """
+    category = equipment.category if equipment else "Other"
+    subtype = equipment.subtype if equipment else None
+    key = ecr_templates.cleaning_key_for(category, subtype)
+
+    if incoming_product is not None and incoming_product == outgoing_product:
+        return ecr_templates.read_same_product_minutes(key)
+
+    template = ecr_templates.read_template(key)
+    if not template:
+        return 0.0  # no imported procedure; caller falls back to the recipe
+    return float(sum(bmr.resolve_op_minutes(st.op_minutes) for st in template))
+
+
+def _step_durations(key: str, fallback_minutes: float,
+                     same_product: bool = False) -> tuple[list[tuple[str, int]], bool]:
     """(name, minutes) per cleaning step, and whether a real template was
-    found. Falls back to a single generic step on the recipe's own Cleaning
-    Time when this equipment category has no imported ECR template yet, so
-    the log still shows *something*."""
+    found.
+
+    `same_product` collapses the procedure to the single batch-to-batch
+    clean: the full step list is the changeover procedure, and repeating the
+    same product does not call for it. Falls back to a single generic step on
+    the recipe's own Cleaning Time when this equipment category has no
+    imported ECR template yet, so the log still shows *something*.
+    """
     template = ecr_templates.read_template(key)
     if not template:
         minutes = fallback_minutes if fallback_minutes > 0 else bmr.resolve_op_minutes(0)
         return [("Equipment Cleaning", round(minutes))], False
+    if same_product:
+        minutes = ecr_templates.read_same_product_minutes(key)
+        return [("Equipment Cleaning (same product — no changeover)", round(minutes))], True
     # Each step runs for exactly the time its ECR master template gives it —
     # no per-batch variance. A step the template leaves at 0 gets the fixed
     # stand-in rather than zero length.
@@ -123,13 +171,7 @@ def _clean_start(session: Session, equipment_id: str, dirty_from: datetime,
     back to land inside the clean-hold when the next booking is far off. With
     nothing booked after it, cleaning simply follows the use.
     """
-    next_alloc = (
-        session.query(Allocation)
-        .filter(Allocation.equipment_id == equipment_id,
-                Allocation.op_start >= dirty_from)
-        .order_by(Allocation.op_start)
-        .first()
-    )
+    next_alloc = _next_booking(session, equipment_id, dirty_from)
     if next_alloc is None:
         return dirty_from, None
 
@@ -152,6 +194,8 @@ def generate_cleaning_steps_for_batch(session: Session, batch_id: int) -> None:
     reschedule since the caller clears old rows first via the batch's cascade
     delete."""
     allocations = session.query(Allocation).filter(Allocation.batch_id == batch_id).all()
+    this_batch = session.get(Batch, batch_id)
+    this_product = this_batch.product_code if this_batch else None
     by_equipment: dict[str, list[Allocation]] = {}
     for a in allocations:
         by_equipment.setdefault(a.equipment_id, []).append(a)
@@ -167,8 +211,15 @@ def generate_cleaning_steps_for_batch(session: Session, batch_id: int) -> None:
         subtype = equipment.subtype if equipment else None
         key = ecr_templates.cleaning_key_for(category, subtype)
 
+        # Whoever is booked next decides how much cleaning is owed: a product
+        # changeover needs the full procedure, the same product again only the
+        # short batch-to-batch clean.
+        next_alloc = _next_booking(session, equipment_id, last.op_end)
+        next_batch = session.get(Batch, next_alloc.batch_id) if next_alloc else None
+        same_product = next_batch is not None and next_batch.product_code == this_product
+
         fallback_minutes = (last.clean_end - last.op_end).total_seconds() / 60
-        durations, _ = _step_durations(key, fallback_minutes)
+        durations, _ = _step_durations(key, fallback_minutes, same_product=same_product)
         total = timedelta(minutes=sum(minutes for _, minutes in durations))
 
         cursor, _deadline = _clean_start(session, equipment_id, last.op_end, total)
@@ -180,6 +231,54 @@ def generate_cleaning_steps_for_batch(session: Session, batch_id: int) -> None:
                 last_operation=last.stage_name, last_op_no=last.stage_seq,
             ))
             cursor = step_end
+
+
+def regenerate_cleaning_steps(session: Session, batch_id: int) -> None:
+    """Drop and re-derive one batch's cleaning rows."""
+    session.query(CleaningStep).filter(CleaningStep.batch_id == batch_id).delete()
+    session.flush()
+    generate_cleaning_steps_for_batch(session, batch_id)
+
+
+def refresh_handover_cleaning(session: Session, batch_id: int) -> list[int]:
+    """Re-derive cleaning for the batches that hand equipment over to this one.
+
+    How much cleaning a batch owes depends on what runs next, and that is not
+    known when the batch is scheduled — the next batch does not exist yet. So
+    booking a batch can change the answer for whoever used the same equipment
+    before it: a reactor handed from one A028 batch to another needs the short
+    batch-to-batch clean, not the full changeover the earlier batch was
+    originally given.
+
+    The scheduler already works this out live when deciding when equipment is
+    free; without this the stored ECR log would disagree with the schedule it
+    is supposed to document. Only the immediate predecessor on each piece of
+    equipment is touched, so this does not cascade.
+
+    Returns the batch ids rewritten.
+    """
+    allocations = session.query(Allocation).filter(Allocation.batch_id == batch_id).all()
+    first_use: dict[str, datetime] = {}
+    for a in allocations:
+        if a.equipment_id not in first_use or a.op_start < first_use[a.equipment_id]:
+            first_use[a.equipment_id] = a.op_start
+
+    predecessors: set[int] = set()
+    for equipment_id, starts_at in first_use.items():
+        previous = (
+            session.query(Allocation)
+            .filter(Allocation.equipment_id == equipment_id,
+                    Allocation.batch_id != batch_id,
+                    Allocation.op_end <= starts_at)
+            .order_by(Allocation.op_end.desc())
+            .first()
+        )
+        if previous is not None:
+            predecessors.add(previous.batch_id)
+
+    for predecessor_id in sorted(predecessors):
+        regenerate_cleaning_steps(session, predecessor_id)
+    return sorted(predecessors)
 
 
 def ecr_log_for_batch(session: Session, batch_id: int) -> list[EquipmentECR]:

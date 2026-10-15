@@ -2,7 +2,7 @@
 hosted Postgres (Supabase) — whichever ``config.DB_URL`` resolved to."""
 import threading
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from .config import DB_URL
@@ -65,4 +65,34 @@ def init_db() -> None:
             return
         from . import models
         models.Base.metadata.create_all(engine)
+        _add_missing_columns()
         _initialised = True
+
+
+# Columns added to a table after it was first created. create_all() only ever
+# CREATEs - it will not ALTER an existing table - so a column added to a model
+# is invisible to any database that already has that table, and every query
+# touching it fails. Each entry here is applied once, if missing.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # table, column, SQL type
+    ("ecr_template_sheets", "same_product_minutes", "FLOAT"),
+)
+
+
+def _add_missing_columns() -> None:
+    """Add any column in _ADDED_COLUMNS the database does not have yet.
+
+    Deliberately tiny: additive, nullable columns only, checked against the
+    live schema rather than tracked by version. That covers the one thing
+    create_all() cannot do without pulling in a migration framework, and a
+    change needing more than this should get one.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table, column, sql_type in _ADDED_COLUMNS:
+        if table not in existing_tables:
+            continue  # create_all() will have built it complete
+        if column in {c["name"] for c in inspector.get_columns(table)}:
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {sql_type}'))
